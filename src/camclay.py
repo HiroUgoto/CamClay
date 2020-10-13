@@ -81,41 +81,42 @@ class CamClay():
     # -------------------------------------------------------------------------------------- #
     def isotropic_compression(self,compression_stress,nstep=1000):
         dcp = (compression_stress - self.p0) / nstep
-        self.e = np.copy(self.e0)
-
-        dstress_vec = np.array([dcp,dcp,dcp,0,0,0])
-        dstress = self.vector_to_matrix(dstress_vec)
-
+        dstress = np.diag(np.array([dcp,dcp,dcp]))
         p = self.p0
+
+        self.e = np.copy(self.e0)
         ev,evp = 0.0,0.0
 
         for i in range(0,nstep):
-            if self.yield_surface(p,0.0,evp) < 0.0:
+            deve = self.kappa/(1.+self.e0)/p * dcp
+            if deve < 0.0:
                 devp = 0.
-                deve = self.kappa/(1.+self.e0) / p * dcp
             else:
-                devp = (self.rlambda-self.kappa)/(1.+self.e0) / p * dcp
-                deve = self.kappa/(1.+self.e0) / p * dcp
+                if self.yield_surface(p,0.0,evp) < 0.0:
+                    devp = 0.
+                else:
+                    devp = (self.rlambda-self.kappa)/(1.+self.e0) / p * dcp
 
             p += dcp
             evp += devp
             ev += deve + devp
+            e = self.e0 - ev*(1+self.e0)
 
         self.stress = np.diag(np.array([dcp,dcp,dcp]))
         self.strain = np.zeros((3,3))
         self.evp = evp
         self.e = self.e0 - ev*(1+self.e0)
 
+        print(" compression stress [kPa]: ", compression_stress*1.e-3)
+        print(" void ratio e: ", self.e)
+
 
     # -------------------------------------------------------------------------------------- #
-    def triaxial_compression(self,e0,compression_stress,de=0.0001,emax=0.20,print_result=False,plot=False):
-        self.isotropic_compression(e0,compression_stress)
-        self.e0 = np.copy(e0)
-        self.e = np.copy(e0)
+    def triaxial_compression(self,compression_stress,de=0.0001,emax=0.20,print_result=False,plot=False):
+        print("+++ initial compression +++")
+        self.isotropic_compression(compression_stress)
 
-        p,_ = self.set_stress_variable(self.stress)
-        self.beta,self.H2 = p,p
-
+        print("+++ triaxial compression +++")
         nstep = int(emax/de)
         dstrain_vec = np.array([0.0,0.0,de,0.0,0.0,0.0])
         dstrain_input = self.vector_to_matrix(dstrain_vec)
@@ -129,6 +130,9 @@ class CamClay():
         gamma_list,R_list = [],[]
         ev_list = []
         for i in range(0,nstep):
+
+            sys.exit()
+
             p,R = self.set_stress_variable(self.stress)
             dstrain,dstress = \
                 self.plastic_deformation(dstrain_input,dstress_input,deformation)
