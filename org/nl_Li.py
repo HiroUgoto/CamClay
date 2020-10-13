@@ -473,7 +473,7 @@ class Li2002:
             self.e = e0 - ev*(1+e0)
 
         self.clear_strain()
-
+        
     # -------------------------------------------------------------------------------------- #
     def triaxial_compression(self,e0,compression_stress,de=0.0001,emax=0.20,print_result=False,plot=False):
         self.isotropic_compression(e0,compression_stress)
