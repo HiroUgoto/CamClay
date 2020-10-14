@@ -128,7 +128,6 @@ class CamClay():
         f = self.yield_surface(stress,evp)
 
         if f > 0.0:
-            # res = scipy.optimize.minimize_scalar(residual_function, bounds=(0.0,1.0),args=(stress,evp),method='bounded')
             res = scipy.optimize.minimize_scalar(residual_function,args=(stress,evp))
             stress_update = p + (1.-res.x)*(stress-p)
             return stress_update - self.stress
@@ -173,25 +172,41 @@ class CamClay():
     def plastic_deformation(self,p,dstrain_given,dstress_given,deformation):
         dstrain_elastic,dstress_elastic = self.elastic_deformation(p,dstrain_given,dstress_given,deformation)
 
-        stress = self.stress + dstress_elastic
-        p = (stress[0,0]+stress[1,1]+stress[2,2])/3.0
-        dstrain = np.copy(dstrain_elastic)
-        evp = np.copy(self.evp)
+        dstress_update = np.copy(dstress_elastic)
+        dstrain_update = np.copy(dstrain_elastic)
+        devp = 0.0
+        norm = np.linalg.norm(dstress_elastic)
 
-        ef = self.check_unload(stress,dstrain)
-        f = self.yield_surface(stress,evp)
-        if f < 0.0:
-            E = self.elastic_stiffness(p)
-        elif f >= 0.0 and self.f0 >= 0.0:
-            E = self.plastic_stiffness(stress)
-        else:
-            gamma = -self.f0 / (f - self.f0)
-            E = self.plastic_stiffness(stress,gamma)
+        for i in range(10):
+            dstress0 = np.copy(dstress_update)
 
-        dstrain_ep,dstress_ep = self.solve_strain_with_consttain(dstrain_given,dstress_given,E,deformation)
-        devp = np.trace(dstrain_ep - dstrain_elastic)
+            stress = self.stress + dstress_update
+            p = (stress[0,0]+stress[1,1]+stress[2,2])/3.0
+            dstrain = np.copy(dstrain_update)
+            evp = self.evp + devp
 
-        return dstrain_ep,dstress_ep,devp
+            ef = self.check_unload(stress,dstrain)
+            f = self.yield_surface(stress,evp)
+            if f < 0.0:
+                E = self.elastic_stiffness(p)
+            elif f >= 0.0 and self.f0 >= 0.0:
+                E = self.plastic_stiffness(stress)
+            else:
+                gamma = -self.f0 / (f - self.f0)
+                E = self.plastic_stiffness(stress,gamma)
+
+            dstrain_ep,dstress_ep = self.solve_strain_with_consttain(dstrain_given,dstress_given,E,deformation)
+            devp = np.trace(dstrain_ep - dstrain_elastic)
+
+            dstress_update = self.stress_correction(dstress_ep,self.evp+devp)
+            # dstress_update[deformation] = 0.0
+            dstrain_update = np.copy(dstrain_ep)
+
+            res = np.linalg.norm(dstress_update-dstress0)
+            if res/norm < 1.e-4:
+                break
+
+        return dstrain_update,dstress_update,devp
 
     # -------------------------------------------------------------------------------------- #
     def vector_to_matrix(self,vec):
@@ -243,7 +258,7 @@ class CamClay():
 
 
     # -------------------------------------------------------------------------------------- #
-    def triaxial_compression(self,compression_stress,de=0.001,emax=2.00,print_result=False,plot=False):
+    def triaxial_compression(self,compression_stress,de=0.0002,emax=1.00,print_result=False,plot=False):
         print("+++ initial compression +++")
         self.isotropic_compression(compression_stress)
         self.e_init = np.copy(self.e)
@@ -265,7 +280,6 @@ class CamClay():
             p,R = self.set_stress_variable(self.stress)
 
             dstrain,dstress,devp = self.plastic_deformation(p,dstrain_input,dstress_input,deformation)
-            dstress = self.stress_correction(dstress,self.evp+devp)
 
             self.stress += dstress
             self.strain += dstrain
@@ -286,6 +300,8 @@ class CamClay():
             # print("+++ triaxial_compression +++")
             print(" e0:",self.e_init)
             print("  e:",self.e)
+            print(self.stress)
+            print(self.strain)
 
         if plot:
             plt.figure()
