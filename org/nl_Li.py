@@ -453,7 +453,7 @@ class Li2002:
         dstrain = np.copy(dstrain_ep)
         dstress = np.copy(dstress_ep)
         return dstrain,dstress,sp2
-
+    
     # -------------------------------------------------------------------------------------- #
     def isotropic_compression(self,e0,compression_stress,nstep=1000):
         dcp = compression_stress / nstep
