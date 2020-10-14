@@ -115,6 +115,27 @@ class CamClay():
 
         return elastic_flag
 
+    # -------------------------------------------------------------------------------------- #
+    def stress_correction(self,dstress,evp):
+        def residual_function(x,stress,evp):
+            p = (stress[0,0]+stress[1,1]+stress[2,2])/3.0
+            stress_x = p + (1.-x)*(stress-p)
+            f = self.yield_surface(stress_x,evp)
+            return f**2
+
+        stress = self.stress + dstress
+        p = (stress[0,0]+stress[1,1]+stress[2,2])/3.0
+        f = self.yield_surface(stress,evp)
+
+        if f > 0.0:
+            # res = scipy.optimize.minimize_scalar(residual_function, bounds=(0.0,1.0),args=(stress,evp),method='bounded')
+            res = scipy.optimize.minimize_scalar(residual_function,args=(stress,evp))
+            stress_update = p + (1.-res.x)*(stress-p)
+            return stress_update - self.stress
+
+        else:
+            return dstress
+
 
     # -------------------------------------------------------------------------------------- #
     def solve_strain(self,stress_mat,E):
@@ -215,13 +236,14 @@ class CamClay():
         self.strain = np.zeros((3,3))
         self.evp = evp
         self.e = self.e0 - ev*(1+self.e0)
+        self.f0 = self.yield_surface(self.stress,self.evp)
 
         print(" compression stress [kPa]: ", compression_stress*1.e-3)
         print(" void ratio e: ", self.e)
 
 
     # -------------------------------------------------------------------------------------- #
-    def triaxial_compression(self,compression_stress,de=0.001,emax=1.00,print_result=False,plot=False):
+    def triaxial_compression(self,compression_stress,de=0.001,emax=2.00,print_result=False,plot=False):
         print("+++ initial compression +++")
         self.isotropic_compression(compression_stress)
         self.e_init = np.copy(self.e)
@@ -241,8 +263,9 @@ class CamClay():
         ev_list = []
         for i in range(0,nstep):
             p,R = self.set_stress_variable(self.stress)
-            self.f0 = self.yield_surface_p(p,R,self.evp)
+
             dstrain,dstress,devp = self.plastic_deformation(p,dstrain_input,dstress_input,deformation)
+            dstress = self.stress_correction(dstress,self.evp+devp)
 
             self.stress += dstress
             self.strain += dstrain
@@ -251,6 +274,7 @@ class CamClay():
             p,R = self.set_stress_variable(self.stress)
             ev,gamma = self.set_strain_variable(self.strain)
             self.e = self.e_init - ev*(1+self.e0)
+            self.f0 = self.yield_surface(self.stress,self.evp)
 
             print(gamma,R,ev,p,self.f0)
 
@@ -259,7 +283,7 @@ class CamClay():
             ev_list += [ev]
 
         if print_result:
-            print("+++ triaxial_compression +++")
+            # print("+++ triaxial_compression +++")
             print(" e0:",self.e_init)
             print("  e:",self.e)
 
