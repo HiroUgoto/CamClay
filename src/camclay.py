@@ -170,43 +170,67 @@ class CamClay():
         return dstrain_elastic,dstress_elastic
 
     def plastic_deformation(self,p,dstrain_given,dstress_given,deformation):
+        # 1. elastic deformation
         dstrain_elastic,dstress_elastic = self.elastic_deformation(p,dstrain_given,dstress_given,deformation)
+        stress = self.stress + dstress_elastic
+        evp = np.copy(self.evp)
 
-        dstress_update = np.copy(dstress_elastic)
-        dstrain_update = np.copy(dstrain_elastic)
-        devp = 0.0
-        norm = np.linalg.norm(dstress_elastic)
+        # 2. check yield surface
+        f = self.yield_surface(stress,evp)
+        if f < 0.0:
+            return dstrain_elastic,dstress_elastic,0.0
 
-        for i in range(10):
-            dstress0 = np.copy(dstress_update)
+        # 3. check unloading
+        if self.check_unload(stress,dstrain_elastic):
+            return dstrain_elastic,dstress_elastic,0.0
 
-            stress = self.stress + dstress_update
-            p = (stress[0,0]+stress[1,1]+stress[2,2])/3.0
-            dstrain = np.copy(dstrain_update)
-            evp = self.evp + devp
+        # 4. plastic loading
+        E = self.plastic_stiffness(stress)
+        dstrain_ep,dstress_ep = self.solve_strain_with_consttain(dstrain_given,dstress_given,E,deformation)
+        devp = np.trace(dstrain_ep - dstrain_elastic)
 
-            ef = self.check_unload(stress,dstrain)
-            f = self.yield_surface(stress,evp)
-            if f < 0.0:
-                E = self.elastic_stiffness(p)
-            elif f >= 0.0 and self.f0 >= 0.0:
-                E = self.plastic_stiffness(stress)
-            else:
-                gamma = -self.f0 / (f - self.f0)
-                E = self.plastic_stiffness(stress,gamma)
+        return dstrain_ep,dstress_ep,devp
 
-            dstrain_ep,dstress_ep = self.solve_strain_with_consttain(dstrain_given,dstress_given,E,deformation)
-            devp = np.trace(dstrain_ep - dstrain_elastic)
 
-            dstress_update = self.stress_correction(dstress_ep,self.evp+devp)
-            # dstress_update[deformation] = 0.0
-            dstrain_update = np.copy(dstrain_ep)
 
-            res = np.linalg.norm(dstress_update-dstress0)
-            if res/norm < 1.e-4:
-                break
-
-        return dstrain_update,dstress_update,devp
+    # def plastic_deformation(self,p,dstrain_given,dstress_given,deformation):
+    #     dstrain_elastic,dstress_elastic = self.elastic_deformation(p,dstrain_given,dstress_given,deformation)
+    #
+    #     dstress_update = np.copy(dstress_elastic)
+    #     dstrain_update = np.copy(dstrain_elastic)
+    #     devp = 0.0
+    #     norm = np.linalg.norm(dstress_elastic)
+    #
+    #     for i in range(10):
+    #         dstress0 = np.copy(dstress_update)
+    #
+    #         stress = self.stress + dstress_update
+    #         p = (stress[0,0]+stress[1,1]+stress[2,2])/3.0
+    #         dstrain = np.copy(dstrain_update)
+    #         evp = self.evp + devp
+    #
+    #         ef = self.check_unload(stress,dstrain)
+    #         f = self.yield_surface(stress,evp)
+    #         if f < 0.0:
+    #             E = self.elastic_stiffness(p)
+    #         elif f >= 0.0 and self.f0 >= 0.0:
+    #             E = self.plastic_stiffness(stress)
+    #         else:
+    #             gamma = -self.f0 / (f - self.f0)
+    #             E = self.plastic_stiffness(stress,gamma)
+    #
+    #         dstrain_ep,dstress_ep = self.solve_strain_with_consttain(dstrain_given,dstress_given,E,deformation)
+    #         devp = np.trace(dstrain_ep - dstrain_elastic)
+    #
+    #         dstress_update = self.stress_correction(dstress_ep,self.evp+devp)
+    #         # dstress_update[deformation] = 0.0
+    #         dstrain_update = np.copy(dstrain_ep)
+    #
+    #         res = np.linalg.norm(dstress_update-dstress0)
+    #         if res/norm < 1.e-4:
+    #             break
+    #
+    #     return dstrain_update,dstress_update,devp
 
     # -------------------------------------------------------------------------------------- #
     def vector_to_matrix(self,vec):
