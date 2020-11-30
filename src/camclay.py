@@ -28,19 +28,22 @@ class CamClay():
         # initial elastic modulus
         self.G,self.K = self.elastic_modulus(self.p0)
 
+        # identity matrix
+        self.I = np.eye(3)
+
     # -------------------------------------------------------------------------------------- #
     def set_stress_variable(self,stress):
-        p = (stress[0,0]+stress[1,1]+stress[2,2])/3.0
-        dev_stress = stress - p*np.eye(3)
+        p = np.trace(stress)/3.0
+        dev_stress = stress - p*self.I
         r_stress = dev_stress / max(p,self.pmin)
-        R = np.sqrt(1.5*np.power(r_stress,2).sum())
+        R = np.sqrt(1.5*np.sum(r_stress**2))
         return p,R
 
     # -------------------------------------------------------------------------------------- #
     def set_strain_variable(self,strain_mat):
-        ev = strain_mat[0,0]+strain_mat[1,1]+strain_mat[2,2]
-        dev_strain = strain_mat - ev/3.0 * np.eye(3)
-        gamma = np.sqrt(2.0/3.0*np.power(dev_strain,2).sum())
+        ev = np.trace(strain_mat)
+        dev_strain = strain_mat - ev/3.0 * self.I
+        gamma = np.sqrt(2.0/3.0*np.sum(dev_strain**2))
         return ev,gamma
 
     # -------------------------------------------------------------------------------------- #
@@ -52,8 +55,8 @@ class CamClay():
     def elastic_stiffness(self,p):
         G,_ = self.elastic_modulus(p)
         mu,rlambda = G,2*G*self.nu/(1-2*self.nu)
-        Dijkl = np.einsum('ij,kl->ijkl',np.eye(3),np.eye(3))
-        Dikjl = np.einsum('ij,kl->ikjl',np.eye(3),np.eye(3))
+        Dijkl = np.einsum('ij,kl->ijkl',self.I,self.I)
+        Dikjl = np.einsum('ij,kl->ikjl',self.I,self.I)
         Ee = rlambda*Dijkl + 2*mu*Dikjl
         return Ee
 
@@ -72,15 +75,15 @@ class CamClay():
 
     # -------------------------------------------------------------------------------------- #
     def set_parameter_n(self,stress):
-        p = (stress[0,0]+stress[1,1]+stress[2,2])/3.0
-        dev_stress = stress - p*np.eye(3)
+        p = np.trace(stress)/3.0
+        dev_stress = stress - p*self.I
         r_stress = dev_stress / max(p,self.pmin)
         R = np.sqrt(1.5*np.power(r_stress,2).sum())
 
         q = p*R
         beta = self.M - R
 
-        nij = (beta/3.*np.eye(3) + 1.5*dev_stress/q) * self.Dd / max(p,self.pmin)
+        nij = (beta/3.*self.I / max(p,self.pmin) + 1.5*r_stress / q) * self.Dd
 
         return nij
 
@@ -191,47 +194,6 @@ class CamClay():
 
         return dstrain_ep,dstress_ep,devp
 
-
-
-    # def plastic_deformation(self,p,dstrain_given,dstress_given,deformation):
-    #     dstrain_elastic,dstress_elastic = self.elastic_deformation(p,dstrain_given,dstress_given,deformation)
-    #
-    #     dstress_update = np.copy(dstress_elastic)
-    #     dstrain_update = np.copy(dstrain_elastic)
-    #     devp = 0.0
-    #     norm = np.linalg.norm(dstress_elastic)
-    #
-    #     for i in range(10):
-    #         dstress0 = np.copy(dstress_update)
-    #
-    #         stress = self.stress + dstress_update
-    #         p = (stress[0,0]+stress[1,1]+stress[2,2])/3.0
-    #         dstrain = np.copy(dstrain_update)
-    #         evp = self.evp + devp
-    #
-    #         ef = self.check_unload(stress,dstrain)
-    #         f = self.yield_surface(stress,evp)
-    #         if f < 0.0:
-    #             E = self.elastic_stiffness(p)
-    #         elif f >= 0.0 and self.f0 >= 0.0:
-    #             E = self.plastic_stiffness(stress)
-    #         else:
-    #             gamma = -self.f0 / (f - self.f0)
-    #             E = self.plastic_stiffness(stress,gamma)
-    #
-    #         dstrain_ep,dstress_ep = self.solve_strain_with_consttain(dstrain_given,dstress_given,E,deformation)
-    #         devp = np.trace(dstrain_ep - dstrain_elastic)
-    #
-    #         dstress_update = self.stress_correction(dstress_ep,self.evp+devp)
-    #         # dstress_update[deformation] = 0.0
-    #         dstrain_update = np.copy(dstrain_ep)
-    #
-    #         res = np.linalg.norm(dstress_update-dstress0)
-    #         if res/norm < 1.e-4:
-    #             break
-    #
-    #     return dstrain_update,dstress_update,devp
-
     # -------------------------------------------------------------------------------------- #
     def vector_to_matrix(self,vec):
         mat = np.array([[vec[0],vec[3],vec[5]],
@@ -279,6 +241,58 @@ class CamClay():
 
         print(" compression stress [kPa]: ", compression_stress*1.e-3)
         print(" void ratio e: ", self.e)
+
+    # -------------------------------------------------------------------------------------- #
+    def simple_shear(self,back_pressure,gamma_max=0.01,dg=0.0001,print_result=False,plot=False):
+        print("+++ initial compression +++")
+        self.isotropic_compression(back_pressure)
+        self.e_init = np.copy(self.e)
+
+        print("+++ simple shear +++")
+        nstep = int(gamma_max/dg)
+        dstrain_vec = np.array([0.0,0.0,0.0,0.0,0.0,dg])
+        dstrain_input = self.vector_to_matrix(dstrain_vec)
+
+        dstress_vec = np.array([0.0,0.0,0.0,0.0,0.0,0.0])
+        dstress_input = self.vector_to_matrix(dstress_vec)
+
+        deformation_vec = np.array([False,False,False,False,False,False],dtype=bool)
+        deformation = self.vector_to_matrix(deformation_vec)
+
+        gamma_list,q_list = [],[]
+        ev_list = []
+        for i in range(0,nstep):
+            p,R = self.set_stress_variable(self.stress)
+
+            dstrain,dstress,devp = self.plastic_deformation(p,dstrain_input,dstress_input,deformation)
+
+            self.stress += dstress
+            self.strain += dstrain
+            self.evp += devp
+
+            p,R = self.set_stress_variable(self.stress)
+            ev,gamma = self.set_strain_variable(self.strain)
+            self.e = self.e_init - ev*(1+self.e0)
+            self.f0 = self.yield_surface(self.stress,self.evp)
+
+            gamma_list += [gamma]
+            q_list += [R*p]
+            ev_list += [ev]
+
+            # print(gamma,R,ev,p,self.f0)
+
+        if print_result:
+            # print("+++ triaxial_compression +++")
+            print(" e0:",self.e_init)
+            print("  e:",self.e)
+            print(self.stress)
+            print(self.strain)
+
+        if plot:
+            plt.figure()
+            plt.plot(gamma_list,q_list)
+            plt.show()
+
 
 
     # -------------------------------------------------------------------------------------- #
